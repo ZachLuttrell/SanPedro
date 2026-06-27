@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>San Pedro — an endless Sonoran desert</title>
+<style>
+  :root{
+    --ink:#e8dcc2;
+    --ink-dim:#b6a079;
+    --line:rgba(232,220,194,0.22);
+    --panel:rgba(20,14,8,0.62);
+  }
+  html,body{margin:0;height:100%;background:#120c06;overflow:hidden;
+    font-family:ui-monospace,"SF Mono","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;}
+  #c{display:block;width:100vw;height:100vh;image-rendering:optimizeQuality;}
+
+  /* ---- HUD: a surveyor's field instrument over an ancient land ---- */
+  .hud{position:fixed;inset:0;pointer-events:none;color:var(--ink);}
+  .field{position:absolute;top:14px;left:16px;}
+  .region{font-size:20px;letter-spacing:.16em;text-transform:uppercase;font-weight:600;
+    text-shadow:0 1px 3px rgba(0,0,0,.6);}
+  .coords{margin-top:5px;font-size:12px;letter-spacing:.18em;color:var(--ink-dim);
+    text-shadow:0 1px 2px rgba(0,0,0,.6);}
+  .clock{margin-top:2px;font-size:12px;letter-spacing:.18em;color:var(--ink-dim);
+    text-shadow:0 1px 2px rgba(0,0,0,.6);}
+  .relic{margin-top:10px;font-size:12px;letter-spacing:.22em;text-transform:uppercase;
+    color:#e8c98a;text-shadow:0 1px 3px rgba(0,0,0,.7);opacity:0;transition:opacity .5s;}
+  .relic.on{opacity:1;}
+
+  .bearings{position:absolute;top:18px;right:18px;text-align:right;width:170px;}
+  .bear{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-dim);
+    margin-top:3px;text-shadow:0 1px 2px rgba(0,0,0,.6);}
+  .bear b{color:var(--ink);font-weight:600;}
+
+  .controls{position:absolute;left:16px;bottom:14px;font-size:11px;letter-spacing:.12em;
+    color:var(--ink-dim);text-shadow:0 1px 2px rgba(0,0,0,.6);opacity:.9;
+    transition:opacity 1.2s;line-height:1.7;}
+  .controls.fade{opacity:.28;}
+  .controls .k{color:var(--ink);}
+
+  /* ---- start veil ---- */
+  #veil{position:fixed;inset:0;background:radial-gradient(120% 120% at 50% 35%,#241606 0%,#0d0804 70%);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+    color:var(--ink);transition:opacity 1s ease;z-index:5;cursor:pointer;}
+  #veil h1{margin:0;font-size:13vmin;letter-spacing:.06em;font-weight:700;line-height:.92;
+    background:linear-gradient(180deg,#f0deb3,#c89a5a);-webkit-background-clip:text;background-clip:text;
+    color:transparent;text-shadow:0 4px 30px rgba(0,0,0,.5);}
+  #veil .sub{margin-top:18px;font-size:13px;letter-spacing:.42em;text-transform:uppercase;color:var(--ink-dim);}
+  #veil .go{margin-top:34px;font-size:12px;letter-spacing:.3em;text-transform:uppercase;
+    color:var(--ink);border:1px solid var(--line);padding:12px 22px;border-radius:2px;
+    animation:pulse 2.6s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{opacity:.55}50%{opacity:1}}
+  #veil .seed{margin-top:26px;font-size:10px;letter-spacing:.24em;color:#6e5c3e;max-width:440px;line-height:1.8;}
+  @media (prefers-reduced-motion: reduce){#veil .go{animation:none}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="hud" aria-hidden="true">
+  <div class="field">
+    <div class="region" id="region">THE SAN PEDRO</div>
+    <div class="coords" id="coords">E 0 m · N 0 m</div>
+    <div class="clock" id="clock">— · —</div>
+    <div class="relic" id="relicLabel"></div>
+  </div>
+  <div class="bearings">
+    <div class="bear" id="bearRiver">RIVER · —</div>
+    <div class="bear" id="bearCamp">CAMP · NOT SET</div>
+  </div>
+  <div class="controls" id="controls">
+    <span class="k">WASD / ARROWS</span> wander &nbsp;·&nbsp;
+    <span class="k">SHIFT</span> jog &nbsp;·&nbsp;
+    <span class="k">C</span> make camp &nbsp;·&nbsp;
+    <span class="k">T</span> hurry the sun
+  </div>
+</div>
+
+<div id="veil">
+  <h1>SAN&nbsp;PEDRO</h1>
+  <div class="sub">an endless Sonoran desert</div>
+  <div class="go">click to wander</div>
+  <div class="seed">The valley runs north. The river will always be there to find your way back to —
+  follow it, or climb away from it into the dry country and the sky islands. The land remembers
+  the same every time you return.</div>
+</div>
+
+<script>
+(() => {
+"use strict";
+
+// ============================================================ canvas / dpr
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha:false });
+let W=0, H=0, DPR=1;
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.floor(W*DPR); canvas.height = Math.floor(H*DPR);
+  canvas.style.width = W+'px'; canvas.style.height = H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.imageSmoothingEnabled = true;
+  invalidateMinimap();
+}
+window.addEventListener('resize', resize);
+
+// ============================================================ deterministic noise
+function hashi(x,y,s){
+  let h = Math.imul(x|0, 374761393) + Math.imul(y|0, 668265263) + Math.imul(s|0, 1442695041);
+  h = (h ^ (h>>>13)) >>> 0;
+  h = Math.imul(h, 1274126177) >>> 0;
+  h = (h ^ (h>>>16)) >>> 0;
+  return h / 4294967296;
+}
+function smooth(t){ return t*t*(3-2*t); }
+function vnoise(x,y,s){
+  const xi=Math.floor(x), yi=Math.floor(y);
+  const xf=x-xi, yf=y-yi;
+  const a=hashi(xi,yi,s),   b=hashi(xi+1,yi,s);
+  const c=hashi(xi,yi+1,s), d=hashi(xi+1,yi+1,s);
+  const u=smooth(xf), v=smooth(yf);
+  return a*(1-u)*(1-v) + b*u*(1-v) + c*(1-u)*v + d*u*v;
+}
+function fbm(x,y,s,oct){
+  oct = oct||4;
+  let amp=0.5, freq=1, sum=0, norm=0;
+  for(let i=0;i<oct;i++){ sum += amp*vnoise(x*freq,y*freq,s+i*101); norm+=amp; amp*=0.5; freq*=2; }
+  return sum/norm;
+}
+
+// ============================================================ world model
+// World is in TILE units. Each tile ~2 metres. River runs roughly north (−y).
+const TILE = 30;
+const CHUNK = 12;                 // tiles per chunk side
+const CHUNK_PX = CHUNK*TILE;
+
+const RIVER_HALF = 2.3;           // water core half-width (tiles)
+
+function riverX(y){
+  return 110*Math.sin(y*0.0100) + 55*Math.sin(y*0.0042 + 1.7)
+       + (fbm(y*0.02 + 9.1, 3.3, 700, 3) - 0.5)*120;
+}
+
+function elevation(x,y){
+  const rx = riverX(y);
+  const d  = Math.abs(x - rx);
+  const distN   = Math.min(d/300, 1.2);
+  const bajada  = Math.pow(Math.min(distN,1), 0.85) * 0.42;
+  const mMask   = smooth(Math.max(0, Math.min(1, (distN - 0.28)/0.72)));
+  const mount   = Math.pow(fbm(x*0.0042, y*0.0042, 500, 5), 1.4) * mMask * 1.5;
+  const hills   = (fbm(x*0.02, y*0.02, 300, 3) - 0.40) * 0.28;
+  const detail  = (fbm(x*0.09, y*0.09, 200, 2) - 0.50) * 0.07;
+  let e = bajada + mount + hills + detail;
+  const channel = Math.max(0, 1 - d/14) * 0.5;   // carve the valley floor
+  return e - channel;
+}
+
+// biome ids
+const B_WATER=0, B_RIPARIAN=1, B_FLAT=2, B_BAJADA=3, B_FOOT=4, B_SKY=5, B_WASH=6;
+
+function biomeAt(x,y){
+  const rx = riverX(y), d = Math.abs(x-rx);
+  const e  = elevation(x,y);
+  if(d < RIVER_HALF) return {b:B_WATER, e, d};
+  if(d < 9 && e < 0.12) return {b:B_RIPARIAN, e, d};
+  const wv = fbm(x*0.03 + 50, y*0.03, 777, 3);
+  if(Math.abs(wv-0.5) < 0.022 && e < 0.5 && d > 3) return {b:B_WASH, e, d};
+  if(e < 0.10) return {b:B_FLAT, e, d};
+  if(e < 0.40) return {b:B_BAJADA, e, d};
+  if(e < 0.66) return {b:B_FOOT, e, d};
+  return {b:B_SKY, e, d};
+}
+
+// base (neutral-day) ground colours, warm Sonoran tones
+const GROUND = {
+  [B_RIPARIAN]:[116,128,63],
+  [B_FLAT]:[182,160,106],
+  [B_BAJADA]:[176,138,84],
+  [B_FOOT]:[156,111,73],
+  [B_SKY]:[95,100,64],
+  [B_WASH]:[204,183,132],
+};
+
+// objects
+const O_NONE=0,O_SAGUARO=1,O_PALO=2,O_COTTON=3,O_MESQUITE=4,O_CREOSOTE=5,
+      O_CHOLLA=6,O_PEAR=7,O_OCOTILLO=8,O_BARREL=9,O_AGAVE=10,O_ROCK=11,
+      O_GRASS=12,O_JUNIPER=13,O_ADOBE=14,O_HEADFRAME=15,O_WINDMILL=16;
+
+const BLOCKING = new Set([O_SAGUARO,O_PALO,O_COTTON,O_MESQUITE,O_JUNIPER,
+      O_BARREL,O_ROCK,O_CHOLLA,O_ADOBE,O_HEADFRAME,O_WINDMILL]);
+const RELICS = new Set([O_ADOBE,O_HEADFRAME,O_WINDMILL]);
+const RELIC_NAME = {[O_ADOBE]:'Adobe Ruin',[O_HEADFRAME]:'Old Mine Works',[O_WINDMILL]:'Abandoned Windmill'};
+
+function objectAt(x,y,b){
+  if(b===B_WATER) return O_NONE;
+  // rare history relics, fitted to the country they belong in
+  const rr = hashi(x,y,4242);
+  if(rr < 0.00040){
+    const t = hashi(x,y,4243);
+    if((b===B_FOOT||b===B_BAJADA) && t<0.5) return O_HEADFRAME;
+    if((b===B_FLAT||b===B_RIPARIAN||b===B_WASH) && t<0.5) return O_WINDMILL;
+    return O_ADOBE; // adobe turns up anywhere people once stood
+  }
+  const r = hashi(x,y,131);
+  switch(b){
+    case B_BAJADA:
+      if(r<.10)return O_SAGUARO; if(r<.20)return O_PALO; if(r<.27)return O_CREOSOTE;
+      if(r<.33)return O_CHOLLA; if(r<.38)return O_PEAR; if(r<.43)return O_OCOTILLO;
+      if(r<.46)return O_BARREL; if(r<.49)return O_AGAVE; if(r<.515)return O_ROCK; return O_NONE;
+    case B_FLAT:
+      if(r<.05)return O_CREOSOTE; if(r<.075)return O_PEAR; if(r<.09)return O_ROCK;
+      if(r<.10)return O_SAGUARO; if(r<.135)return O_GRASS; return O_NONE;
+    case B_RIPARIAN:
+      if(r<.15)return O_COTTON; if(r<.33)return O_MESQUITE; if(r<.45)return O_GRASS;
+      if(r<.49)return O_PEAR; if(r<.51)return O_ROCK; return O_NONE;
+    case B_WASH:
+      if(r<.12)return O_MESQUITE; if(r<.20)return O_PALO; if(r<.26)return O_CREOSOTE;
+      if(r<.30)return O_ROCK; if(r<.34)return O_PEAR; return O_NONE;
+    case B_FOOT:
+      if(r<.10)return O_ROCK; if(r<.16)return O_OCOTILLO; if(r<.21)return O_AGAVE;
+      if(r<.25)return O_BARREL; if(r<.29)return O_SAGUARO; if(r<.33)return O_PEAR; return O_NONE;
+    case B_SKY:
+      if(r<.26)return O_JUNIPER; if(r<.33)return O_ROCK; if(r<.37)return O_AGAVE; return O_NONE;
+  }
+  return O_NONE;
+}
+
+// region names — ecological, with a few real nods to the corridor
+const REGION_NAMES = {
+  [B_WATER]:['The San Pedro'],
+  [B_RIPARIAN]:['San Pedro Riparian','Cottonwood Bosque','Mesquite Bosque','The Green Corridor'],
+  [B_FLAT]:['Creosote Flats','Desert Grassland','Open Desert','Tobosa Flats'],
+  [B_BAJADA]:['Saguaro Bajada','Palo Verde Slopes','Cactus Country','Sonoran Bajada'],
+  [B_FOOT]:['Galiuro Foothills','Rocky Foothills','Agave Slopes','The Bajada Heights'],
+  [B_SKY]:['Sky Island Pinyon','Juniper Highlands','The High Country','Oak Woodland'],
+  [B_WASH]:['Dry Wash','Sandy Arroyo','The Wash','Desert Draw'],
+};
+function regionName(tx,ty,b){
+  const arr = REGION_NAMES[b];
+  const cell = Math.floor(tx/40)*131 + Math.floor(ty/40);
+  return arr[Math.floor(hashi(cell, b, 55)*arr.length)];
+}
+
+function isBlocked(tx,ty){
+  const bi = biomeAt(tx,ty);
+  if(bi.b===B_WATER) return true;
+  return BLOCKING.has(objectAt(tx,ty,bi.b));
+}
+
+// ============================================================ chunk cache (ground prerender)
+const chunks = new Map();
+function chunkKey(cx,cy){ return cx+','+cy; }
+
+function buildChunk(cx,cy){
+  const cv = document.createElement('canvas');
+  cv.width = CHUNK_PX; cv.height = CHUNK_PX;
+  const cc = cv.getContext('2d');
+  const objects = [];
+  for(let ty=0; ty<CHUNK; ty++){
+    for(let tx=0; tx<CHUNK; tx++){
+      const wx = cx*CHUNK + tx, wy = cy*CHUNK + ty;
+      const bi = biomeAt(wx,wy);
+      let r,g,bl;
+      if(bi.b===B_WATER){
+        const depth = Math.max(0, 1 - bi.d/RIVER_HALF);
+        r = 90 - depth*48; g = 132 - depth*52; bl = 158 - depth*40;
+      } else {
+        const base = GROUND[bi.b];
+        // cheap hillshade from elevation gradient, light from NW
+        const relief = elevation(wx-1,wy-1) - elevation(wx+1,wy+1);
+        let shade = 1 + relief*2.2;
+        if(shade<0.62)shade=0.62; if(shade>1.36)shade=1.36;
+        const vary = (hashi(wx,wy,99)-0.5)*20;
+        r = base[0]*shade + vary; g = base[1]*shade + vary; bl = base[2]*shade + vary;
+      }
+      cc.fillStyle = 'rgb('+(r|0)+','+(g|0)+','+(bl|0)+')';
+      cc.fillRect(tx*TILE, ty*TILE, TILE+1, TILE+1);
+
+      const o = objectAt(wx,wy,bi.b);
+      if(o!==O_NONE){
+        objects.push({ wx, wy, o, v: hashi(wx,wy,77),
+          block: BLOCKING.has(o), relic: RELICS.has(o) });
+      }
+    }
+  }
+  return { cv, objects };
+}
+function getChunk(cx,cy){
+  const k = chunkKey(cx,cy);
+  let ch = chunks.get(k);
+  if(!ch){ ch = buildChunk(cx,cy); chunks.set(k,ch); }
+  return ch;
+}
+function evictChunks(pcx,pcy){
+  if(chunks.size < 90) return;
+  for(const k of chunks.keys()){
+    const [a,b] = k.split(',');
+    if(Math.abs((+a)-pcx)>4 || Math.abs((+b)-pcy)>4) chunks.delete(k);
+  }
+}
+
+// ============================================================ object drawing
+function shadowEl(x,y,w){ ctx.fillStyle='rgba(0,0,0,0.17)';
+  ctx.beginPath(); ctx.ellipse(x,y,w,w*0.4,0,0,7); ctx.fill(); }
+
+function drawObject(o,v,sx,sy){
+  switch(o){
+    case O_SAGUARO:{
+      const h=26+v*22, w=8;
+      shadowEl(sx,sy,9);
+      ctx.fillStyle='#46703c';
+      rr(sx-w/2, sy-h, w, h, 4); ctx.fill();
+      // arms
+      if(v>0.40){ rr(sx-w/2-9, sy-h*0.62, 5, h*0.34, 3); ctx.fill();
+        rr(sx-w/2-9, sy-h*0.62, 11, 5, 3); ctx.fill(); }
+      if(v>0.72){ rr(sx+w/2+4, sy-h*0.74, 5, h*0.30, 3); ctx.fill();
+        rr(sx+w/2-2, sy-h*0.74, 11, 5, 3); ctx.fill(); }
+      ctx.strokeStyle='rgba(40,70,48,0.6)'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(sx,sy-h+3); ctx.lineTo(sx,sy-3); ctx.stroke();
+      break; }
+    case O_PALO:{
+      shadowEl(sx,sy,9);
+      ctx.strokeStyle='#7d9a46'; ctx.lineWidth=2.5;
+      ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(sx,sy-12); ctx.stroke();
+      blob(sx,sy-16,11+v*4,'#9cb45c'); blob(sx-8,sy-12,7,'#90ab50'); blob(sx+8,sy-13,7,'#a6bd66');
+      break; }
+    case O_COTTON:{
+      shadowEl(sx,sy,13);
+      ctx.strokeStyle='#6b4f33'; ctx.lineWidth=3.5;
+      ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(sx,sy-16); ctx.stroke();
+      blob(sx,sy-24,15+v*5,'#6f9a3e'); blob(sx-11,sy-19,10,'#7aa648'); blob(sx+11,sy-20,10,'#659038');
+      break; }
+    case O_MESQUITE:{
+      shadowEl(sx,sy,11);
+      ctx.strokeStyle='#5e4a30'; ctx.lineWidth=2.5;
+      ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(sx,sy-8); ctx.stroke();
+      blob(sx,sy-13,11+v*4,'#557a36'); blob(sx-8,sy-10,7,'#4d6f30'); blob(sx+8,sy-11,7,'#5f8540');
+      break; }
+    case O_CREOSOTE:{
+      blob(sx,sy-3,6+v*2,'#6e7a3e'); blob(sx-5,sy-1,4,'#647037'); blob(sx+5,sy-2,4,'#76824a');
+      break; }
+    case O_CHOLLA:{
+      shadowEl(sx,sy,7);
+      for(let i=0;i<5;i++){ const a=i*1.3+v*6;
+        fuzz(sx+Math.cos(a)*6, sy-4-Math.sin(a)*7, 4.5); }
+      break; }
+    case O_PEAR:{
+      pad(sx-4,sy-6,7,9); pad(sx+5,sy-7,7,10); pad(sx,sy-12,6,8);
+      break; }
+    case O_OCOTILLO:{
+      ctx.strokeStyle='#6b5a3a'; ctx.lineWidth=1.6;
+      for(let i=0;i<8;i++){ const a=-Math.PI/2 + (i-3.5)*0.20;
+        const ex=sx+Math.cos(a)*(20+v*6), ey=sy+Math.sin(a)*(20+v*6);
+        ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
+        ctx.fillStyle='#c0392b'; ctx.beginPath(); ctx.arc(ex,ey,1.6,0,7); ctx.fill(); }
+      break; }
+    case O_BARREL:{
+      shadowEl(sx,sy,8);
+      ctx.fillStyle='#5e7a3f';
+      ctx.beginPath(); ctx.ellipse(sx,sy-6,8,10,0,0,7); ctx.fill();
+      ctx.strokeStyle='rgba(40,60,40,0.5)'; ctx.lineWidth=1;
+      for(let i=-2;i<=2;i++){ ctx.beginPath();
+        ctx.moveTo(sx+i*3, sy-15); ctx.lineTo(sx+i*3, sy+1); ctx.stroke(); }
+      break; }
+    case O_AGAVE:{
+      for(let i=0;i<9;i++){ const a=i*0.7;
+        spike(sx,sy-2, a, 11+v*4, '#7d9a86'); }
+      break; }
+    case O_ROCK:{
+      shadowEl(sx,sy,9);
+      rock(sx,sy-3,8+v*5); if(v>0.5) rock(sx+7,sy,5+v*3);
+      break; }
+    case O_GRASS:{
+      ctx.strokeStyle='#b8a45a'; ctx.lineWidth=1.4;
+      for(let i=0;i<5;i++){ const ox=(i-2)*2.4;
+        ctx.beginPath(); ctx.moveTo(sx+ox,sy); ctx.lineTo(sx+ox*1.4,sy-7-((i*37)%4)); ctx.stroke(); }
+      break; }
+    case O_JUNIPER:{
+      shadowEl(sx,sy,11);
+      ctx.strokeStyle='#5e4a30'; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(sx,sy-9); ctx.stroke();
+      blob(sx,sy-15,12+v*5,'#4a5c33'); blob(sx-8,sy-11,8,'#43522e'); blob(sx+8,sy-12,8,'#52653a');
+      break; }
+    case O_ADOBE:{
+      shadowEl(sx,sy,15);
+      ctx.fillStyle='#b08a5f';
+      // broken wall
+      ctx.fillRect(sx-15,sy-12,30,12);
+      ctx.fillRect(sx-15,sy-18,8,6); ctx.fillRect(sx-2,sy-16,7,4); ctx.fillRect(sx+9,sy-19,6,7);
+      ctx.fillStyle='rgba(60,40,24,0.35)';
+      ctx.fillRect(sx-15,sy-2,30,2);
+      break; }
+    case O_HEADFRAME:{
+      shadowEl(sx,sy,14);
+      ctx.strokeStyle='#6b4f33'; ctx.lineWidth=3;
+      ctx.beginPath();
+      ctx.moveTo(sx-12,sy); ctx.lineTo(sx,sy-30);
+      ctx.moveTo(sx+12,sy); ctx.lineTo(sx,sy-30);
+      ctx.moveTo(sx-8,sy-12); ctx.lineTo(sx+8,sy-12);
+      ctx.stroke();
+      ctx.fillStyle='#5a4128'; ctx.beginPath(); ctx.arc(sx,sy-30,4,0,7); ctx.fill();
+      break; }
+    case O_WINDMILL:{
+      shadowEl(sx,sy,10);
+      ctx.strokeStyle='#8a8e94'; ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.moveTo(sx-7,sy); ctx.lineTo(sx,sy-26);
+      ctx.moveTo(sx+7,sy); ctx.lineTo(sx,sy-26);
+      ctx.stroke();
+      ctx.strokeStyle='#aab0b6'; ctx.lineWidth=1.4;
+      for(let i=0;i<6;i++){ const a=i*(Math.PI/3)+v*6;
+        ctx.beginPath(); ctx.moveTo(sx,sy-30);
+        ctx.lineTo(sx+Math.cos(a)*9, sy-30+Math.sin(a)*9); ctx.stroke(); }
+      break; }
+  }
+}
+// drawing primitives
+function rr(x,y,w,h,r){ ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function blob(x,y,r,col){ ctx.fillStyle=col; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fill(); }
+function fuzz(x,y,r){ ctx.fillStyle='#9fae6a'; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fill();
+  ctx.strokeStyle='rgba(220,230,190,0.5)'; ctx.lineWidth=0.7;
+  for(let i=0;i<6;i++){ const a=i; ctx.beginPath();
+    ctx.moveTo(x,y); ctx.lineTo(x+Math.cos(a)*(r+2), y+Math.sin(a)*(r+2)); ctx.stroke(); } }
+function pad(x,y,w,h){ ctx.fillStyle='#5f8a47';
+  ctx.beginPath(); ctx.ellipse(x,y,w,h,0,0,7); ctx.fill();
+  ctx.fillStyle='rgba(30,60,30,0.4)';
+  for(let i=0;i<5;i++){ ctx.beginPath();
+    ctx.arc(x-w/2+(i%3)*w/2, y-h/2+Math.floor(i/3)*h, 0.8,0,7); ctx.fill(); } }
+function spike(x,y,a,len,col){ ctx.fillStyle=col;
+  const tx=x+Math.cos(a)*len, ty=y+Math.sin(a)*len;
+  const px=Math.cos(a+1.57)*2.4, py=Math.sin(a+1.57)*2.4;
+  ctx.beginPath(); ctx.moveTo(x+px,y+py); ctx.lineTo(x-px,y-py); ctx.lineTo(tx,ty); ctx.closePath(); ctx.fill(); }
+function rock(x,y,r){ ctx.fillStyle='#8a8076';
+  ctx.beginPath(); ctx.arc(x,y,r,Math.PI,0); ctx.lineTo(x+r,y+r*0.4);
+  ctx.lineTo(x-r,y+r*0.4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.arc(x-r*0.3,y-r*0.2,r*0.4,0,7); ctx.fill(); }
+
+// ============================================================ player / camp / wildlife
+const player = { x:0, y:0, vx:0, vy:0, facing:1, bob:0 };
+let camp = null; // {x,y}
+const rabbits = [];
+let hawk = null;
+
+function drawPlayer(sx,sy){
+  shadowEl(sx,sy,7);
+  const b = Math.sin(player.bob)* ((Math.abs(player.vx)+Math.abs(player.vy))>4?1.5:0);
+  // simple wanderer: hat + poncho
+  ctx.fillStyle='#3a2c1c';
+  rr(sx-6, sy-18+b, 12, 16, 4); ctx.fill();       // body / poncho
+  ctx.fillStyle='#caa86a';
+  ctx.beginPath(); ctx.arc(sx, sy-20+b, 4.5, 0,7); ctx.fill();  // head
+  ctx.fillStyle='#2c2114';
+  ctx.beginPath(); ctx.ellipse(sx, sy-23+b, 8, 3, 0,0,7); ctx.fill();   // hat brim
+  rr(sx-3, sy-27+b, 6, 5, 2); ctx.fill();         // hat crown
+}
+
+function drawCamp(sx,sy,night){
+  if(night){ const g=ctx.createRadialGradient(sx,sy-4,2,sx,sy-4,70);
+    g.addColorStop(0,'rgba(255,170,70,0.35)'); g.addColorStop(1,'rgba(255,170,70,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy-4,70,0,7); ctx.fill(); }
+  shadowEl(sx,sy,10);
+  // stone ring
+  ctx.fillStyle='#7a7066';
+  for(let i=0;i<7;i++){ const a=i*0.9; ctx.beginPath();
+    ctx.arc(sx+Math.cos(a)*10, sy+Math.sin(a)*4, 2.6,0,7); ctx.fill(); }
+  // logs + flame
+  ctx.strokeStyle='#5a4128'; ctx.lineWidth=2.5;
+  ctx.beginPath(); ctx.moveTo(sx-5,sy+1); ctx.lineTo(sx+5,sy-2);
+  ctx.moveTo(sx+5,sy+1); ctx.lineTo(sx-5,sy-2); ctx.stroke();
+  const f = 1 + Math.sin(performance.now()*0.012)*0.18;
+  ctx.fillStyle='#ffb347';
+  ctx.beginPath(); ctx.moveTo(sx-4,sy-2); ctx.quadraticCurveTo(sx,sy-16*f,sx+4,sy-2); ctx.fill();
+  ctx.fillStyle='#ff7a18';
+  ctx.beginPath(); ctx.moveTo(sx-2.5,sy-2); ctx.quadraticCurveTo(sx,sy-11*f,sx+2.5,sy-2); ctx.fill();
+}
+
+function updateRabbits(dt){
+  // keep ~3 near the player, off-screen spawn, flee when close
+  const px=player.x/TILE, py=player.y/TILE;
+  for(let i=rabbits.length-1;i>=0;i--){
+    const r=rabbits[i];
+    const dx=r.x-px, dy=r.y-py, dist=Math.hypot(dx,dy);
+    if(dist>24){ rabbits.splice(i,1); continue; }
+    if(dist<4){ // flee
+      const n=Math.max(0.001,dist); r.tx=r.x+(dx/n)*8; r.ty=r.y+(dy/n)*8; r.spd=7;
+    } else if(Math.hypot(r.x-r.tx, r.y-r.ty)<0.6 || r.tx===undefined){
+      r.tx=r.x+(Math.random()-0.5)*8; r.ty=r.y+(Math.random()-0.5)*8; r.spd=2.2;
+    }
+    const mx=r.tx-r.x, my=r.ty-r.y, m=Math.max(0.001,Math.hypot(mx,my));
+    r.x+=(mx/m)*r.spd*dt; r.y+=(my/m)*r.spd*dt;
+    r.hop=(r.hop||0)+dt*r.spd*1.4;
+  }
+  if(rabbits.length<3 && Math.random()<0.04){
+    const a=Math.random()*7, rad=15+Math.random()*6;
+    const rx=px+Math.cos(a)*rad, ry=py+Math.sin(a)*rad;
+    if(!isBlocked(Math.floor(rx),Math.floor(ry))) rabbits.push({x:rx,y:ry,hop:0,spd:2.2});
+  }
+}
+function drawRabbit(sx,sy,hop){
+  const b = Math.abs(Math.sin(hop))*5;
+  ctx.fillStyle='rgba(0,0,0,0.15)';
+  ctx.beginPath(); ctx.ellipse(sx,sy,5,2,0,0,7); ctx.fill();
+  ctx.fillStyle='#caa878';
+  ctx.beginPath(); ctx.ellipse(sx,sy-3-b,4,3,0,0,7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(sx-3,sy-4-b,1,3,-0.3,0,7); ctx.fill(); // ear
+  ctx.beginPath(); ctx.ellipse(sx-1.5,sy-4-b,1,3,0.1,0,7); ctx.fill();
+}
+
+// ============================================================ time of day
+let dayT = 0.30; // 0=midnight .25=sunrise .5=noon .75=sunset
+function dayAdvance(dt, fast){ dayT = (dayT + dt/(fast?14:240)) % 1; }
+function timeFactors(){
+  const k = (Math.cos(dayT*Math.PI*2)*0.5+0.5);                 // 0 noon → 1 midnight
+  const warm = Math.max(0, 1 - Math.min(Math.abs(dayT-0.25),Math.abs(dayT-0.75))/0.10);
+  return {k, warm};
+}
+function clockText(){
+  const mins = dayT*1440; const hh=Math.floor(mins/60)%24, mm=Math.floor(mins%60);
+  const hphase = hh;
+  let phase = 'Night';
+  if(hphase>=5&&hphase<7)phase='Dawn'; else if(hphase>=7&&hphase<11)phase='Morning';
+  else if(hphase>=11&&hphase<15)phase='Midday'; else if(hphase>=15&&hphase<18)phase='Afternoon';
+  else if(hphase>=18&&hphase<20)phase='Dusk';
+  return (hh<10?'0':'')+hh+':'+(mm<10?'0':'')+mm+' · '+phase;
+}
+
+// ============================================================ input
+const keys = {};
+function down(e){
+  const k=e.key.toLowerCase();
+  keys[k]=true;
+  if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
+  if(k==='c') placeCamp();
+  hideControls();
+}
+function up(e){ keys[e.key.toLowerCase()]=false; }
+window.addEventListener('keydown',down);
+window.addEventListener('keyup',up);
+
+function placeCamp(){ camp = { x:player.x, y:player.y }; }
+
+let ctrlTimer=null;
+function hideControls(){
+  const el=document.getElementById('controls');
+  el.classList.remove('fade'); clearTimeout(ctrlTimer);
+  ctrlTimer=setTimeout(()=>el.classList.add('fade'),4500);
+}
+
+// movement input → velocity (tiles/sec in px terms)
+function readMove(){
+  let ix=0, iy=0;
+  if(keys['a']||keys['arrowleft'])ix-=1;
+  if(keys['d']||keys['arrowright'])ix+=1;
+  if(keys['w']||keys['arrowup'])iy-=1;
+  if(keys['s']||keys['arrowdown'])iy+=1;
+  if(ix||iy){ const m=Math.hypot(ix,iy); ix/=m; iy/=m; }
+  return {ix,iy};
+}
+
+// ============================================================ minimap
+let mm=null, mmAge=999, mmCx=0, mmCy=0;
+const MM_SIZE=78, MM_STEP=2.2; // world tiles per minimap px
+function invalidateMinimap(){ mmAge=999; }
+function quickBiomeColor(x,y){
+  const rx=riverX(y), d=Math.abs(x-rx);
+  if(d<RIVER_HALF) return [70,120,150];
+  const e=elevation(x,y);
+  if(d<9 && e<0.12) return [96,118,60];
+  if(e<0.10) return [176,156,104];
+  if(e<0.40) return [168,132,82];
+  if(e<0.66) return [150,108,72];
+  return [90,98,62];
+}
+function renderMinimap(){
+  if(!mm){ mm=document.createElement('canvas'); mm.width=MM_SIZE; mm.height=MM_SIZE; }
+  const mc=mm.getContext('2d');
+  const img=mc.createImageData(MM_SIZE,MM_SIZE);
+  const px=player.x/TILE, py=player.y/TILE;
+  mmCx=px; mmCy=py;
+  for(let j=0;j<MM_SIZE;j++) for(let i=0;i<MM_SIZE;i++){
+    const wx=Math.floor(px + (i-MM_SIZE/2)*MM_STEP);
+    const wy=Math.floor(py + (j-MM_SIZE/2)*MM_STEP);
+    const c=quickBiomeColor(wx,wy);
+    const o=(j*MM_SIZE+i)*4;
+    img.data[o]=c[0]; img.data[o+1]=c[1]; img.data[o+2]=c[2]; img.data[o+3]=255;
+  }
+  mc.putImageData(img,0,0);
+  mmAge=0;
+}
+function drawMinimap(){
+  if(mmAge>8 || Math.hypot(player.x/TILE-mmCx, player.y/TILE-mmCy)>6) renderMinimap();
+  const S=132, x=W-S-18, y=44;
+  ctx.save();
+  ctx.fillStyle='rgba(20,14,8,0.55)';
+  rr(x-6,y-6,S+12,S+12,4); ctx.fill();
+  ctx.strokeStyle='rgba(232,220,194,0.22)'; ctx.lineWidth=1; ctx.stroke();
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(mm, x, y, S, S);
+  ctx.imageSmoothingEnabled=true;
+  // camp marker
+  if(camp){
+    const cx=x+S/2 + ((camp.x-player.x)/TILE)/MM_STEP;
+    const cy=y+S/2 + ((camp.y-player.y)/TILE)/MM_STEP;
+    if(cx>x&&cx<x+S&&cy>y&&cy<y+S){
+      ctx.fillStyle='#ffb347'; ctx.beginPath(); ctx.arc(cx,cy,2.5,0,7); ctx.fill(); }
+  }
+  // player
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(x+S/2,y+S/2,2.5,0,7); ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,0.6)'; ctx.lineWidth=1; ctx.stroke();
+  // N
+  ctx.fillStyle='rgba(232,220,194,0.7)'; ctx.font='9px ui-monospace,monospace';
+  ctx.textAlign='center'; ctx.fillText('N', x+S/2, y+9);
+  ctx.restore();
+}
+
+// ============================================================ HUD text
+const elRegion=document.getElementById('region');
+const elCoords=document.getElementById('coords');
+const elClock=document.getElementById('clock');
+const elRiver=document.getElementById('bearRiver');
+const elCamp=document.getElementById('bearCamp');
+const elRelic=document.getElementById('relicLabel');
+function compass(dx,dy){
+  const a=Math.atan2(-dy,dx); const dirs=['E','NE','N','NW','W','SW','S','SE'];
+  let idx=Math.round(a/(Math.PI/4)); idx=((idx%8)+8)%8; return dirs[idx];
+}
+let relicShown='';
+function updateHUD(){
+  const tx=Math.round(player.x/TILE), ty=Math.round(player.y/TILE);
+  const bi=biomeAt(tx,ty);
+  elRegion.textContent = regionName(tx,ty,bi.b).toUpperCase();
+  const ex=Math.round(player.x/TILE*2), ny=Math.round(-player.y/TILE*2);
+  elCoords.textContent = (ex>=0?'E ':'W ')+Math.abs(ex)+' m · '+(ny>=0?'N ':'S ')+Math.abs(ny)+' m';
+  elClock.textContent = clockText();
+  // river bearing
+  const rx=riverX(player.y/TILE); const rdx=(rx - player.x/TILE);
+  const rdist=Math.round(Math.abs(rdx)*2);
+  elRiver.innerHTML = 'RIVER · <b>'+rdist+' m '+(rdx<0?'W':'E')+'</b>';
+  // camp bearing
+  if(camp){ const cdx=camp.x-player.x, cdy=camp.y-player.y;
+    const cd=Math.round(Math.hypot(cdx,cdy)/TILE*2);
+    elCamp.innerHTML='CAMP · <b>'+cd+' m '+compass(cdx,cdy)+'</b>';
+  } else elCamp.innerHTML='CAMP · <b>NOT SET</b>';
+}
+
+// ============================================================ main loop
+const veil=document.getElementById('veil');
+let started=false, last=0;
+function begin(){ if(started)return; started=true;
+  veil.style.opacity='0'; setTimeout(()=>veil.style.display='none',1000);
+  hideControls(); last=performance.now(); requestAnimationFrame(loop);
+}
+veil.addEventListener('click',begin);
+window.addEventListener('keydown',()=>{ if(!started)begin(); },{once:false});
+
+function loop(now){
+  let dt=(now-last)/1000; last=now; if(dt>0.05)dt=0.05;
+
+  // --- update
+  const {ix,iy}=readMove();
+  const sprint = (keys['shift']||keys['shiftleft']||keys['shiftright'])?1.9:1;
+  const speed = 150*sprint;
+  player.vx=ix*speed; player.vy=iy*speed;
+  if(ix||iy) player.bob+=dt*14;
+
+  // collide X then Y against blocked tiles (with radius offset)
+  const RAD=9;
+  let nx=player.x + player.vx*dt;
+  if(player.vx!==0){
+    const edge=nx + Math.sign(player.vx)*RAD;
+    if(!isBlocked(Math.floor(edge/TILE), Math.floor(player.y/TILE))) player.x=nx;
+  }
+  let ny=player.y + player.vy*dt;
+  if(player.vy!==0){
+    const edge=ny + Math.sign(player.vy)*RAD;
+    if(!isBlocked(Math.floor(player.x/TILE), Math.floor(edge/TILE))) player.y=ny;
+  }
+
+  dayAdvance(dt, !!keys['t']);
+  updateRabbits(dt);
+
+  // hawk shadow by day
+  const {k,warm}=timeFactors();
+  if(k<0.45){
+    if(!hawk && Math.random()<0.004){
+      hawk={ x:player.x/TILE-18, y:player.y/TILE-10+Math.random()*20, vx:6+Math.random()*3, vy:(Math.random()-0.5)*2, life:0 };
+    }
+    if(hawk){ hawk.x+=hawk.vx*dt; hawk.y+=hawk.vy*dt; hawk.life+=dt;
+      if(hawk.life>16) hawk=null; }
+  } else hawk=null;
+
+  // --- camera
+  const camX=player.x - W/2, camY=player.y - H/2;
+
+  // --- draw ground (chunks)
+  ctx.fillStyle='#1a1208'; ctx.fillRect(0,0,W,H);
+  const pcx=Math.floor((player.x/TILE)/CHUNK), pcy=Math.floor((player.y/TILE)/CHUNK);
+  const c0x=Math.floor(camX/CHUNK_PX)-1, c1x=Math.floor((camX+W)/CHUNK_PX)+1;
+  const c0y=Math.floor(camY/CHUNK_PX)-1, c1y=Math.floor((camY+H)/CHUNK_PX)+1;
+  const drawList=[];
+  for(let cy=c0y; cy<=c1y; cy++) for(let cx=c0x; cx<=c1x; cx++){
+    const ch=getChunk(cx,cy);
+    ctx.drawImage(ch.cv, Math.round(cx*CHUNK_PX-camX), Math.round(cy*CHUNK_PX-camY));
+    for(const ob of ch.objects){
+      const sx=ob.wx*TILE+TILE/2-camX, sy=ob.wy*TILE+TILE/2-camY;
+      if(sx<-40||sx>W+40||sy<-60||sy>H+40) continue;
+      drawList.push({sy, draw:()=>drawObject(ob.o, ob.v, sx, sy)});
+    }
+  }
+  evictChunks(pcx,pcy);
+
+  // camp + rabbits + player into the y-sorted list
+  if(camp){ const sx=camp.x-camX, sy=camp.y-camY;
+    drawList.push({sy, draw:()=>drawCamp(sx,sy,k>0.55)}); }
+  for(const r of rabbits){ const sx=r.x*TILE-camX, sy=r.y*TILE-camY;
+    if(sx<-30||sx>W+30||sy<-30||sy>H+30) continue;
+    drawList.push({sy, draw:()=>drawRabbit(sx,sy,r.hop||0)}); }
+  drawList.push({sy:player.y-camY, draw:()=>drawPlayer(player.x-camX, player.y-camY)});
+
+  drawList.sort((a,b)=>a.sy-b.sy);
+  for(const d of drawList) d.draw();
+
+  // hawk shadow on top of ground/objects
+  if(hawk){ const sx=hawk.x*TILE-camX, sy=hawk.y*TILE-camY;
+    ctx.fillStyle='rgba(0,0,0,0.16)';
+    ctx.beginPath();
+    ctx.moveTo(sx,sy); ctx.lineTo(sx-9,sy+5); ctx.lineTo(sx,sy+2); ctx.lineTo(sx+9,sy+5);
+    ctx.closePath(); ctx.fill(); }
+
+  // --- time-of-day grade
+  if(warm>0.02){ ctx.fillStyle='rgba(255,120,40,'+(warm*0.30).toFixed(3)+')'; ctx.fillRect(0,0,W,H); }
+  if(k>0.02){ ctx.fillStyle='rgba(12,20,48,'+(k*0.62).toFixed(3)+')'; ctx.fillRect(0,0,W,H); }
+  // gentle vignette always
+  const vg=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.45,W/2,H/2,Math.max(W,H)*0.75);
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.30)');
+  ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
+
+  // --- relic proximity label
+  let near='';
+  for(const d of drawList){}
+  for(let cy=c0y; cy<=c1y; cy++) for(let cx=c0x; cx<=c1x; cx++){
+    const ch=chunks.get(chunkKey(cx,cy)); if(!ch)continue;
+    for(const ob of ch.objects){ if(!ob.relic)continue;
+      const dd=Math.hypot(ob.wx-player.x/TILE, ob.wy-player.y/TILE);
+      if(dd<3.2){ near=RELIC_NAME[ob.o]; } }
+  }
+  if(near!==relicShown){ relicShown=near;
+    if(near){ elRelic.textContent='✦ '+near; elRelic.classList.add('on'); }
+    else elRelic.classList.remove('on'); }
+
+  // --- UI
+  drawMinimap();
+  updateHUD();
+
+  requestAnimationFrame(loop);
+}
+
+// boot
+resize();
+// first paint behind the veil
+ctx.fillStyle='#1a1208'; ctx.fillRect(0,0,W,H);
+
+})();
+</script>
+</body>
+</html>
